@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Dooray Audio Controller - Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #e0e0e0;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── 상단 헤더 ── */
+    .top-bar {
+      background: linear-gradient(135deg, #161b22, #1a1a2e);
+      border-bottom: 1px solid #30363d;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .top-bar h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #e94560;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .top-bar .status-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status-chip {
+      padding: 4px 14px;
+      border-radius: 16px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-chip.active { background: #00b894; color: #fff; }
+    .status-chip.inactive { background: #636e72; color: #dfe6e9; }
+    .status-chip.warning { background: #e94560; color: #fff; animation: pulse 0.6s infinite alternate; }
+
+    @keyframes pulse { to { opacity: 0.5; } }
+
+    /* ── 레이아웃 ── */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 32px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .full-width { grid-column: 1 / -1; }
+
+    /* ── 카드 ── */
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-header h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #c9d1d9;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .card-body { padding: 20px; }
+
+    /* ── 실시간 미터 ── */
+    .meter-section {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .meter-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .meter-label {
+      flex: 0 0 80px;
+      font-size: 12px;
+      color: #8b949e;
+    }
+
+    .meter-bar-wrap {
+      flex: 1;
+      height: 20px;
+      background: #21262d;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .meter-bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 4px;
+      transition: width 0.08s ease-out;
+    }
+
+    .meter-bar.input {
+      background: linear-gradient(90deg, #00b894 0%, #fdcb6e 60%, #e94560 90%);
+    }
+
+    .meter-bar.output {
+      background: linear-gradient(90deg, #0984e3 0%, #6c5ce7 60%, #e94560 90%);
+    }
+
+    .meter-value {
+      flex: 0 0 80px;
+      text-align: right;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Consolas', monospace;
+      color: #fdcb6e;
+    }
+
+    /* ── FFT 캔버스 ── */
+    .canvas-wrap {
+      width: 100%;
+      background: #0d1117;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #21262d;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 180px;
+    }
+
+    .canvas-label {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 8px;
+      font-size: 10px;
+      color: #8b949e;
+    }
+
+    /* ── 마스터 토글 ── */
+    .master-section {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 8px 0;
+    }
+
+    .toggle-big {
+      position: relative;
+      width: 56px;
+      height: 30px;
+      cursor: pointer;
+    }
+    .toggle-big input { opacity: 0; width: 0; height: 0; }
+    .toggle-big .slider {
+      position: absolute; inset: 0;
+      background: #444; border-radius: 15px; transition: 0.3s;
+    }
+    .toggle-big .slider::before {
+      content: ''; position: absolute;
+      width: 24px; height: 24px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: 0.3s;
+    }
+    .toggle-big input:checked + .slider { background: #e94560; }
+    .toggle-big input:checked + .slider::before { transform: translateX(26px); }
+
+    .master-label {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    /* ── 프리셋 ── */
+    .presets-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    .preset-btn {
+      padding: 14px 8px;
+      border: 1px solid #30363d;
+      background: #21262d;
+      color: #c9d1d9;
+      border-radius: 8px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+      font-size: 13px;
+    }
+    .preset-btn:hover { border-color: #e94560; background: rgba(233,69,96,0.1); }
+    .preset-btn.active { background: #e94560; color: #fff; border-color: #e94560; }
+    .preset-btn .icon { font-size: 24px; display: block; margin-bottom: 6px; }
+    .preset-btn .label { font-size: 12px; }
+
+    /* ── 슬라이더 ── */
+    .control-group {
+      margin-bottom: 18px;
+    }
+
+    .control-group:last-child { margin-bottom: 0; }
+
+    .control-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .control-header label {
+      font-size: 13px;
+      color: #c9d1d9;
+    }
+
+    .control-header .value {
+      font-size: 13px;
+      font-family: 'SF Mono', 'Consolas', monospace;
+      color: #fdcb6e;
+      background: #21262d;
+      padding: 2px 10px;
+      border-radius: 4px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 6px;
+      -webkit-appearance: none;
+      background: #21262d;
+      border-radius: 3px;
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: #e94560;
+      cursor: pointer;
+      border: 2px solid #fff;
+    }
+
+    /* ── 토글 행 ── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #21262d;
+    }
+    .toggle-row:last-child { border-bottom: none; }
+
+    .toggle-row label {
+      font-size: 13px;
+      color: #c9d1d9;
+    }
+
+    .toggle-row .desc {
+      font-size: 11px;
+      color: #8b949e;
+      margin-top: 2px;
+    }
+
+    .toggle-sm {
+      position: relative;
+      width: 40px; height: 22px;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .toggle-sm input { opacity: 0; width: 0; height: 0; }
+    .toggle-sm .slider {
+      position: absolute; inset: 0;
+      background: #444; border-radius: 11px; transition: 0.3s;
+    }
+    .toggle-sm .slider::before {
+      content: ''; position: absolute;
+      width: 16px; height: 16px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: 0.3s;
+    }
+    .toggle-sm input:checked + .slider { background: #00b894; }
+    .toggle-sm input:checked + .slider::before { transform: translateX(18px); }
+
+    /* ── 로그 ── */
+    .log-area {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: 'SF Mono', 'Consolas', monospace;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .log-entry { padding: 1px 0; }
+    .log-entry.info { color: #8b949e; }
+    .log-entry.warn { color: #fdcb6e; }
+    .log-entry.error { color: #e94560; }
+    .log-entry.success { color: #00b894; }
+
+    /* ── RNNoise 강조 ── */
+    .rnnoise-badge {
+      font-size: 10px;
+      background: #00b894;
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    /* ── 하단 ── */
+    .footer-bar {
+      padding: 16px 32px;
+      text-align: center;
+      color: #8b949e;
+      font-size: 12px;
+      border-top: 1px solid #30363d;
+    }
+
+    .footer-bar button {
+      padding: 6px 20px;
+      margin: 0 8px;
+      border: 1px solid #30363d;
+      background: #21262d;
+      color: #c9d1d9;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: 0.2s;
+    }
+    .footer-bar button:hover { border-color: #e94560; color: #e94560; }
+
+    /* ── 반응형 ── */
+    @media (max-width: 800px) {
+      .container { grid-template-columns: 1fr; padding: 16px; }
+      .presets-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 상단 바 -->
+  <div class="top-bar">
+    <h1>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#e94560" stroke-width="2" stroke-linecap="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+      Dooray Audio Controller
+    </h1>
+    <div class="status-group">
+      <span class="status-chip inactive" id="connectionStatus">Dooray 미연결</span>
+      <span class="status-chip inactive" id="pipelineStatus">파이프라인 대기</span>
+      <span class="status-chip inactive" id="howlingStatus" style="display:none">하울링 감지</span>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- ====== 실시간 레벨 미터 (전체폭) ====== -->
+    <div class="card full-width">
+      <div class="card-header">
+        <h2>실시간 오디오 레벨</h2>
+        <div class="master-section">
+          <label class="toggle-big">
+            <input type="checkbox" id="masterToggle" checked>
+            <span class="slider"></span>
+          </label>
+          <span class="master-label" id="masterLabel">활성</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="meter-section">
+          <div class="meter-row">
+            <span class="meter-label">입력 레벨</span>
+            <div class="meter-bar-wrap">
+              <div class="meter-bar input" id="inputMeter"></div>
+            </div>
+            <span class="meter-value" id="inputDb">-∞ dB</span>
+          </div>
+          <div class="meter-row">
+            <span class="meter-label">피크</span>
+            <div class="meter-bar-wrap">
+              <div class="meter-bar output" id="peakMeter"></div>
+            </div>
+            <span class="meter-value" id="peakValue">0%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 주파수 스펙트럼 ====== -->
+    <div class="card">
+      <div class="card-header">
+        <h2>주파수 스펙트럼 (FFT)</h2>
+        <span class="rnnoise-badge" id="rnnoiseBadge">RNNoise OFF</span>
+      </div>
+      <div class="card-body">
+        <div class="canvas-wrap">
+          <canvas id="fftCanvas"></canvas>
+          <div class="canvas-label">
+            <span>0 Hz</span>
+            <span>하울링 감지 대역 (200-4000Hz)</span>
+            <span>24 kHz</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 파형 ====== -->
+    <div class="card">
+      <div class="card-header">
+        <h2>파형 (Waveform)</h2>
+      </div>
+      <div class="card-body">
+        <div class="canvas-wrap">
+          <canvas id="waveCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 프리셋 (전체폭) ====== -->
+    <div class="card full-width">
+      <div class="card-header"><h2>프리셋</h2></div>
+      <div class="card-body">
+        <div class="presets-grid">
+          <button class="preset-btn" data-preset="quiet">
+            <span class="icon">🔇</span>
+            <span class="label">조용한 환경</span>
+          </button>
+          <button class="preset-btn" data-preset="noisy">
+            <span class="icon">🏢</span>
+            <span class="label">소음 환경</span>
+          </button>
+          <button class="preset-btn" data-preset="meeting">
+            <span class="icon">👥</span>
+            <span class="label">회의실</span>
+          </button>
+          <button class="preset-btn" data-preset="boost">
+            <span class="icon">🔊</span>
+            <span class="label">볼륨 최대</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 볼륨 & 필터 ====== -->
+    <div class="card">
+      <div class="card-header"><h2>볼륨 & 주파수 필터</h2></div>
+      <div class="card-body">
+        <div class="control-group">
+          <div class="control-header">
+            <label>볼륨 부스트</label>
+            <span class="value" id="gainValue">1.5x</span>
+          </div>
+          <input type="range" id="gain" min="0.5" max="4" step="0.1" value="1.5">
+        </div>
+        <div class="control-group">
+          <div class="control-header">
+            <label>고역 통과 필터 (HPF)</label>
+            <span class="value" id="highPassValue">80 Hz</span>
+          </div>
+          <input type="range" id="highPassFrequency" min="20" max="300" step="10" value="80">
+        </div>
+        <div class="control-group">
+          <div class="control-header">
+            <label>저역 통과 필터 (LPF)</label>
+            <span class="value" id="lowPassValue">14 kHz</span>
+          </div>
+          <input type="range" id="lowPassFrequency" min="4000" max="20000" step="500" value="14000">
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 컴프레서 ====== -->
+    <div class="card">
+      <div class="card-header"><h2>다이나믹 컴프레서</h2></div>
+      <div class="card-body">
+        <div class="control-group">
+          <div class="control-header">
+            <label>임계값 (Threshold)</label>
+            <span class="value" id="compThreshValue">-24 dB</span>
+          </div>
+          <input type="range" id="compressorThreshold" min="-60" max="0" step="1" value="-24">
+        </div>
+        <div class="control-group">
+          <div class="control-header">
+            <label>압축비 (Ratio)</label>
+            <span class="value" id="compRatioValue">4:1</span>
+          </div>
+          <input type="range" id="compressorRatio" min="1" max="20" step="0.5" value="4">
+        </div>
+        <div class="control-group">
+          <div class="control-header">
+            <label>니 (Knee)</label>
+            <span class="value" id="compKneeValue">10 dB</span>
+          </div>
+          <input type="range" id="compressorKnee" min="0" max="40" step="1" value="10">
+        </div>
+        <div class="control-group">
+          <div class="control-header">
+            <label>어택 (Attack)</label>
+            <span class="value" id="compAttackValue">3 ms</span>
+          </div>
+          <input type="range" id="compressorAttack" min="0" max="0.1" step="0.001" value="0.003">
+        </div>
+        <div class="control-group">
+          <div class="control-header">
+            <label>릴리즈 (Release)</label>
+            <span class="value" id="compReleaseValue">250 ms</span>
+          </div>
+          <input type="range" id="compressorRelease" min="0.01" max="1" step="0.01" value="0.25">
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 기능 토글 ====== -->
+    <div class="card">
+      <div class="card-header"><h2>오디오 처리 기능</h2></div>
+      <div class="card-body">
+        <div class="toggle-row">
+          <div>
+            <label>RNNoise AI 노이즈 제거</label>
+            <div class="desc">Mozilla 딥러닝 기반 실시간 노이즈 제거</div>
+          </div>
+          <label class="toggle-sm">
+            <input type="checkbox" id="rnnoiseEnabled" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <label>브라우저 노이즈 서프레션</label>
+            <div class="desc">Chrome 내장 노이즈 제거</div>
+          </div>
+          <label class="toggle-sm">
+            <input type="checkbox" id="noiseSuppression" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <label>에코 캔슬레이션</label>
+            <div class="desc">스피커→마이크 에코 제거</div>
+          </div>
+          <label class="toggle-sm">
+            <input type="checkbox" id="echoCancellation" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <label>하울링 자동 감지 & 억제</label>
+            <div class="desc">FFT 분석으로 피드백 루프 감지 시 자동 게인 감소</div>
+          </div>
+          <label class="toggle-sm">
+            <input type="checkbox" id="howlingDetection" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <label>자동 게인 컨트롤 (AGC)</label>
+            <div class="desc">브라우저 내장 자동 음량 조절</div>
+          </div>
+          <label class="toggle-sm">
+            <input type="checkbox" id="autoGainControl" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 이벤트 로그 ====== -->
+    <div class="card">
+      <div class="card-header">
+        <h2>이벤트 로그</h2>
+        <button style="font-size:11px;background:#21262d;border:1px solid #30363d;color:#8b949e;padding:3px 10px;border-radius:4px;cursor:pointer" id="clearLogBtn">지우기</button>
+      </div>
+      <div class="card-body">
+        <div class="log-area" id="logArea">
+          <div class="log-entry info">[시작] 대시보드 초기화...</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 하단 -->
+  <div class="footer-bar">
+    <button id="resetBtn">⟲ 모든 설정 초기화</button>
+    <button id="exportBtn">📋 설정 내보내기</button>
+    <button id="importBtn">📥 설정 가져오기</button>
+    <span style="margin-left:16px">Dooray WebRTC Audio Controller v1.0.0</span>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

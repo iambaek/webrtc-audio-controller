@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Dooray WebRTC Audio Controller",
+  "version": "1.0.0",
+  "description": "Dooray 화상회의 오디오 튜닝 - 하울링 방지, 볼륨 부스트, RNNoise AI 노이즈 제거",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "tabs",
+    "declarativeContent"
+  ],
+  "host_permissions": [
+    "https://*.dooray.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.dooray.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.dooray.com/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["rnnoise-worklet.js", "rnnoise.wasm"],
+      "matches": ["https://*.dooray.com/*"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
