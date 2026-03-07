@@ -15,22 +15,14 @@ Dooray 화상회의 오디오 품질을 개선하는 Chrome Extension입니다.
 
 ## 설치 방법
 
-### 1. RNNoise WASM 준비 (선택사항)
-
-```bash
-bash setup-rnnoise.sh
-```
-
-WASM 파일 없이도 Extension은 동작합니다 (폴백 노이즈 억제 사용).
-
-### 2. Chrome에 로드
+### 1. Chrome에 로드
 
 1. Chrome에서 `chrome://extensions` 열기
 2. 우측 상단 **개발자 모드** 활성화
 3. **압축해제된 확장 프로그램을 로드합니다** 클릭
 4. 이 폴더(`webrtc-audio-controller`) 선택
 
-### 3. 사용
+### 2. 사용
 
 1. Dooray 화상회의 페이지 접속
 2. Extension 아이콘 클릭하여 팝업 열기
