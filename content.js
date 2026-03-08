@@ -118,7 +118,11 @@
   // ── 실시간 레벨 측정 ──
   function getAudioLevels() {
     const levels = [];
-    for (const node of processingNodes) {
+    for (const node of [...processingNodes]) {
+      if (!node.audioCtx || node.audioCtx.state === 'closed') {
+        cleanupProcessingNode(node, 'context closed');
+        continue;
+      }
       if (node.analyser) {
         const data = new Uint8Array(node.analyser.fftSize);
         node.analyser.getByteTimeDomainData(data);
@@ -141,6 +145,77 @@
       }
     }
     return levels;
+  }
+
+  function postBadgeUpdate(active) {
+    window.postMessage({
+      source: 'dooray-audio-main',
+      type: 'UPDATE_BADGE',
+      payload: { type: 'UPDATE_BADGE', active }
+    }, '*');
+  }
+
+  function applyEnabledRouting(node, timeConstant = 0.05) {
+    if (!node?.audioCtx || node.audioCtx.state === 'closed') return;
+    const t = node.audioCtx.currentTime;
+    const enabled = !!currentSettings.enabled;
+
+    if (node.wetGainNode) {
+      node.wetGainNode.gain.setTargetAtTime(enabled ? 1 : 0, t, timeConstant);
+    }
+    if (node.dryGainNode) {
+      node.dryGainNode.gain.setTargetAtTime(enabled ? 0 : 1, t, timeConstant);
+    }
+    if (!enabled) {
+      node.howlingDetected = false;
+    }
+  }
+
+  function cleanupProcessingNode(node, reason = 'cleanup') {
+    if (!node || node.cleaned) return;
+    node.cleaned = true;
+
+    if (node.howlingIntervalId) {
+      clearInterval(node.howlingIntervalId);
+      node.howlingIntervalId = null;
+    }
+
+    if (Array.isArray(node.cleanupFns)) {
+      for (const fn of node.cleanupFns) {
+        try { fn(); } catch (e) { /* ignore */ }
+      }
+      node.cleanupFns = [];
+    }
+
+    const disconnectTargets = [
+      node.source, node.highPass, node.lowPass, node.rnnoiseNode,
+      node.compressor, node.preGainAnalyser, ...(node.notchFilters || []),
+      node.gainNode, node.wetGainNode, node.dryGainNode, node.analyser, node.destination
+    ];
+    for (const target of disconnectTargets) {
+      if (target && typeof target.disconnect === 'function') {
+        try { target.disconnect(); } catch (e) { /* ignore */ }
+      }
+    }
+
+    if (node.audioCtx && node.audioCtx.state !== 'closed') {
+      node.audioCtx.close().catch(() => {});
+    }
+
+    processingNodes = processingNodes.filter((n) => n !== node);
+    audioContexts = audioContexts.filter((ctx) => ctx !== node.audioCtx);
+
+    if (processingNodes.length === 0) {
+      postBadgeUpdate(false);
+    }
+
+    console.log(`[DoorayAudio] 오디오 파이프라인 정리: ${reason}`);
+  }
+
+  function cleanupAllProcessingNodes(reason = 'global cleanup') {
+    for (const node of [...processingNodes]) {
+      cleanupProcessingNode(node, reason);
+    }
   }
 
   // ── 하울링 감지 & 억제 (프리-알로케이트 노치 필터) ──
@@ -384,6 +459,12 @@
     const gainNode = audioCtx.createGain();
     gainNode.gain.value = currentSettings.gain;
 
+    // 실시간 ON/OFF 전환용 wet/dry 게인
+    const wetGainNode = audioCtx.createGain();
+    const dryGainNode = audioCtx.createGain();
+    wetGainNode.gain.value = currentSettings.enabled ? 1 : 0;
+    dryGainNode.gain.value = currentSettings.enabled ? 0 : 1;
+
     // 6) 하울링 감지용 분석기 (게인 앞 = pre-gain)
     //    게인 변경에 영향받지 않아 안정적으로 하울링 감지 가능
     const preGainAnalyser = audioCtx.createAnalyser();
@@ -408,8 +489,11 @@
 
     // 체인: source → HPF → LPF → [RNNoise] → compressor
     //        → preGainAnalyser (분석 분기, dead-end)
-    //        → notch[0] → notch[1] → notch[2] → gain → analyser → destination
+    //        → notch[0] → notch[1] → notch[2] → gain → wetGain
+    //      + source → dryGain
+    //      wet/dry 믹스 → analyser → destination
     source.connect(highPass);
+    source.connect(dryGainNode);
     highPass.connect(lowPass);
 
     if (rnnoiseNode) {
@@ -427,26 +511,38 @@
       notchFilters[i].connect(notchFilters[i + 1]);
     }
     notchFilters[notchFilters.length - 1].connect(gainNode);
-    gainNode.connect(analyser);
+    gainNode.connect(wetGainNode);
+    wetGainNode.connect(analyser);
+    dryGainNode.connect(analyser);
     analyser.connect(destination);
 
     const nodeInfo = {
       audioCtx, source, highPass, lowPass, rnnoiseNode,
-      compressor, gainNode, analyser, preGainAnalyser,
+      compressor, gainNode, wetGainNode, dryGainNode,
+      analyser, preGainAnalyser,
       notchFilters, destination,
       howlingDetected: false,
-      howlingIntervalId: null
+      howlingIntervalId: null,
+      cleanupFns: [],
+      cleaned: false
     };
     processingNodes.push(nodeInfo);
 
     nodeInfo.howlingIntervalId = createHowlingDetector(audioCtx, preGainAnalyser, gainNode, notchFilters);
+    applyEnabledRouting(nodeInfo, 0.01);
+
+    // 트랙/스트림 종료 시 리소스 정리
+    for (const track of stream.getAudioTracks()) {
+      const onEnded = () => cleanupProcessingNode(nodeInfo, 'audio track ended');
+      track.addEventListener('ended', onEnded);
+      nodeInfo.cleanupFns.push(() => track.removeEventListener('ended', onEnded));
+    }
+    const onInactive = () => cleanupProcessingNode(nodeInfo, 'stream inactive');
+    stream.addEventListener('inactive', onInactive);
+    nodeInfo.cleanupFns.push(() => stream.removeEventListener('inactive', onInactive));
 
     // 배지 업데이트 요청
-    window.postMessage({
-      source: 'dooray-audio-main',
-      type: 'UPDATE_BADGE',
-      payload: { type: 'UPDATE_BADGE', active: true }
-    }, '*');
+    postBadgeUpdate(true);
 
     console.log('[DoorayAudio] 오디오 파이프라인 활성화');
     console.log(`  게인: ${currentSettings.gain}x | HPF: ${currentSettings.highPassFrequency}Hz | LPF: ${currentSettings.lowPassFrequency}Hz | RNNoise: ${rnnoiseNode ? 'ON' : 'OFF'}`);
@@ -462,7 +558,7 @@
 
   // ── 설정 실시간 적용 ──
   function applySettingsToAllNodes() {
-    for (const node of processingNodes) {
+    for (const node of [...processingNodes]) {
       if (!node.audioCtx || node.audioCtx.state === 'closed') continue;
       const t = node.audioCtx.currentTime;
 
@@ -474,6 +570,7 @@
       node.compressor.knee.setTargetAtTime(currentSettings.compressorKnee, t, 0.05);
       node.compressor.attack.setTargetAtTime(currentSettings.compressorAttack, t, 0.05);
       node.compressor.release.setTargetAtTime(currentSettings.compressorRelease, t, 0.05);
+      applyEnabledRouting(node, 0.05);
 
       // RNNoise 런타임 토글: @timephy 워크릿은 항상 처리하므로
       // 비활성화 시 노드를 disconnect/reconnect로 바이패스
@@ -533,22 +630,13 @@
       return origAddEventListener(type, listener, options);
     };
 
-    let _ontrack = null;
-    Object.defineProperty(pc, 'ontrack', {
-      get: () => _ontrack,
-      set: (handler) => {
-        _ontrack = function (event) {
-          if (event.track.kind === 'audio') {
-            console.log('[DoorayAudio] 수신 오디오 트랙 (ontrack)');
-          }
-          handler.call(this, event);
-        };
-      }
-    });
-
     return pc;
   };
   window.RTCPeerConnection.prototype = OriginalRTCPeerConnection.prototype;
+
+  window.addEventListener('beforeunload', () => {
+    cleanupAllProcessingNodes('page unload');
+  });
 
   // ── 초기화 ──
   loadSettings();

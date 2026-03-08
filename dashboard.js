@@ -194,6 +194,29 @@
       rnnBadge.textContent = settings.rnnoiseEnabled ? 'RNNoise ON' : 'RNNoise OFF';
       rnnBadge.style.background = settings.rnnoiseEnabled ? '#00b894' : '#636e72';
     }
+
+    syncPresetButtons(settings);
+  }
+
+  function isPresetMatch(settings, preset) {
+    for (const [key, value] of Object.entries(preset)) {
+      if (settings[key] !== value) return false;
+    }
+    return true;
+  }
+
+  function syncPresetButtons(settings) {
+    let matchedPresetKey = null;
+    for (const [presetKey, preset] of Object.entries(PRESETS)) {
+      if (isPresetMatch(settings, preset)) {
+        matchedPresetKey = presetKey;
+        break;
+      }
+    }
+
+    document.querySelectorAll('.preset-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.preset === matchedPresetKey);
+    });
   }
 
   // ── 설정 로드 (content script에서) ──

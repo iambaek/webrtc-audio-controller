@@ -178,6 +178,30 @@
         el.checked = settings[key];
       }
     }
+
+    syncPresetButtons(settings);
+  }
+
+  function isPresetMatch(settings, preset) {
+    for (const [key, value] of Object.entries(preset)) {
+      if (key === 'name') continue;
+      if (settings[key] !== value) return false;
+    }
+    return true;
+  }
+
+  function syncPresetButtons(settings) {
+    let matchedPresetKey = null;
+    for (const [presetKey, preset] of Object.entries(PRESETS)) {
+      if (isPresetMatch(settings, preset)) {
+        matchedPresetKey = presetKey;
+        break;
+      }
+    }
+
+    document.querySelectorAll('.preset-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.preset === matchedPresetKey);
+    });
   }
 
   // ── 설정 업데이트 (content script 전송 + 브로드캐스트) ──
