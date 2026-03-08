@@ -40,6 +40,10 @@
     highPassFrequency: 80,
     lowPassFrequency: 14000,
     rnnoiseEnabled: true,
+    vadEnabled: true,
+    vadThreshold: -35,
+    vadRecoveryDelay: 2000,
+    vadHysteresis: 3,
   };
 
   let currentSettings = { ...DEFAULT_SETTINGS };
@@ -171,6 +175,88 @@
     }
   }
 
+  // ── 음성 활동 감지(VAD) 기반 자동 마이크 제어 ──
+  function toggleAutoMic(node, shouldEnable) {
+    if (!node?.audioCtx || node.audioCtx.state === 'closed') return;
+
+    const wasEnabled = currentSettings.enabled;
+
+    // 이미 원하는 상태면 변경 불필요
+    if (shouldEnable === wasEnabled) return;
+
+    // 설정 변경
+    currentSettings.enabled = shouldEnable;
+    applyEnabledRouting(node, 0.05);
+
+    console.log(`[DoorayAudio VAD] 마이크 ${shouldEnable ? '활성화' : '비활성화'}`);
+    node.autoMicState = shouldEnable;
+  }
+
+  // ── 음성 활동 감지 루프 ──
+  function createVADDetector(audioCtx, preGainAnalyser, nodeInfo) {
+    const bufferLength = preGainAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    // VAD 상태 초기화
+    nodeInfo.vadState = {
+      isSpeaking: false,
+      lastSpeechTime: 0,
+      consecutiveFramesSilent: 0,
+    };
+
+    const intervalId = setInterval(() => {
+      if (audioCtx.state === 'closed' || !currentSettings.vadEnabled) return;
+
+      // RMS/dB 계산 (getAudioLevels 로직과 동일)
+      preGainAnalyser.getByteTimeDomainData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const val = (dataArray[i] - 128) / 128;
+        sum += val * val;
+      }
+      const rms = Math.sqrt(sum / dataArray.length);
+      const db = 20 * Math.log10(Math.max(rms, 1e-10));
+
+      // 히스테리시스를 적용한 음성 감지
+      const threshold = nodeInfo.vadState.isSpeaking
+        ? currentSettings.vadThreshold - currentSettings.vadHysteresis
+        : currentSettings.vadThreshold;
+
+      const speechDetected = db >= threshold;
+
+      if (speechDetected) {
+        // 음성 감지됨
+        nodeInfo.vadState.isSpeaking = true;
+        nodeInfo.vadState.lastSpeechTime = Date.now();
+        nodeInfo.vadState.consecutiveFramesSilent = 0;
+
+        // 마이크 자동 활성화
+        if (!nodeInfo.autoMicState && currentSettings.vadEnabled) {
+          toggleAutoMic(nodeInfo, true);
+        }
+      } else {
+        // 침묵 감지
+        nodeInfo.vadState.consecutiveFramesSilent++;
+
+        // 복구 지연 경과 확인
+        const silenceDuration = Date.now() - nodeInfo.vadState.lastSpeechTime;
+        if (silenceDuration > currentSettings.vadRecoveryDelay) {
+          if (nodeInfo.vadState.isSpeaking) {
+            nodeInfo.vadState.isSpeaking = false;
+            console.log('[DoorayAudio VAD] 침묵 감지');
+          }
+
+          // 마이크 자동 비활성화
+          if (nodeInfo.autoMicState && currentSettings.vadEnabled) {
+            toggleAutoMic(nodeInfo, false);
+          }
+        }
+      }
+    }, 50); // 50ms 간격 (howling detection과 동일)
+
+    return intervalId;
+  }
+
   function cleanupProcessingNode(node, reason = 'cleanup') {
     if (!node || node.cleaned) return;
     node.cleaned = true;
@@ -178,6 +264,11 @@
     if (node.howlingIntervalId) {
       clearInterval(node.howlingIntervalId);
       node.howlingIntervalId = null;
+    }
+
+    if (node.vadIntervalId) {
+      clearInterval(node.vadIntervalId);
+      node.vadIntervalId = null;
     }
 
     if (Array.isArray(node.cleanupFns)) {
@@ -523,12 +614,21 @@
       notchFilters, destination,
       howlingDetected: false,
       howlingIntervalId: null,
+      vadState: null,
+      vadIntervalId: null,
+      autoMicState: true,
       cleanupFns: [],
       cleaned: false
     };
     processingNodes.push(nodeInfo);
 
     nodeInfo.howlingIntervalId = createHowlingDetector(audioCtx, preGainAnalyser, gainNode, notchFilters);
+
+    // VAD 감지기 초기화
+    if (currentSettings.vadEnabled) {
+      nodeInfo.vadIntervalId = createVADDetector(audioCtx, preGainAnalyser, nodeInfo);
+    }
+
     applyEnabledRouting(nodeInfo, 0.01);
 
     // 트랙/스트림 종료 시 리소스 정리
@@ -571,6 +671,19 @@
       node.compressor.attack.setTargetAtTime(currentSettings.compressorAttack, t, 0.05);
       node.compressor.release.setTargetAtTime(currentSettings.compressorRelease, t, 0.05);
       applyEnabledRouting(node, 0.05);
+
+      // VAD 설정 변경 시 감지기 재시작
+      if (node.vadIntervalId) {
+        clearInterval(node.vadIntervalId);
+        node.vadIntervalId = null;
+      }
+
+      if (currentSettings.vadEnabled) {
+        node.autoMicState = true;
+        node.vadIntervalId = createVADDetector(node.audioCtx, node.preGainAnalyser, node);
+      } else {
+        node.autoMicState = true;
+      }
 
       // RNNoise 런타임 토글: @timephy 워크릿은 항상 처리하므로
       // 비활성화 시 노드를 disconnect/reconnect로 바이패스

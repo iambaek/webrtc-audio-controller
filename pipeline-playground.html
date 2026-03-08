@@ -80,6 +80,7 @@
     <button class="tab active" data-view="pipeline">오디오 파이프라인</button>
     <button class="tab" data-view="arch">아키텍처</button>
     <button class="tab" data-view="howling">하울링 시스템</button>
+    <button class="tab" data-view="vad">VAD 시스템</button>
   </div>
 </div>
 
@@ -103,7 +104,7 @@ const NODES = {
   lpf:         { label:"Low-Pass",        icon:"📉", desc:"BiquadFilter (lowpass)\n기본: 14000Hz / Q=0.7\n고주파 잡음 제거 (전자 노이즈 등)", color:"#74b9ff", file:"content.js", line:"352-355" },
   rnnoise:     { label:"RNNoise AI",      icon:"🧠", desc:"AudioWorkletNode\nMozilla RNNoise (WASM base64 내장)\n딥러닝 노이즈 제거\n480 샘플 프레임 / 별도 오디오 스레드", color:"#fd79a8", file:"rnnoise-worklet.js", line:"611-749", optional:true },
   compressor:  { label:"Compressor",      icon:"🔊", desc:"DynamicsCompressor\nthreshold: -24dB / ratio: 4:1\nknee: 10 / attack: 3ms\nrelease: 250ms\n다이나믹 레인지 제어", color:"#fdcb6e", file:"content.js", line:"376-381" },
-  preAnalyser: { label:"Pre-Gain Analyser", icon:"📊", desc:"AnalyserNode (FFT 4096)\nsmoothing: 0.3\n주파수 해상도: ~11.7Hz/bin\n하울링 감지 전용 (dead-end 분기)\n게인 영향 없는 안정적 분석", color:"#e17055", file:"content.js", line:"389-391", branch:true },
+  preAnalyser: { label:"Pre-Gain Analyser", icon:"📊", desc:"AnalyserNode (FFT 4096)\nsmoothing: 0.3\n주파수 해상도: ~11.7Hz/bin\n하울링 감지 + VAD 음성 감지 (dead-end 분기)\n게인 영향 없는 안정적 분석", color:"#e17055", file:"content.js", line:"389-391", branch:true },
   notch0:      { label:"Notch #0",        icon:"🔇", desc:"BiquadFilter\nallpass(투명) ↔ notch(억제) 전환\nQ=10 (넓은 대역)\n프리-알로케이트 (disconnect 없음)", color:"#6c5ce7", file:"content.js", line:"400-407" },
   notch1:      { label:"Notch #1",        icon:"🔇", desc:"BiquadFilter\nallpass ↔ notch 전환\n동적 주파수 추적\n±80Hz 유사 주파수 병합", color:"#6c5ce7", file:"content.js", line:"400-407" },
   notch2:      { label:"Notch #2",        icon:"🔇", desc:"BiquadFilter\nallpass ↔ notch 전환\n최대 3개 동시 활성\n3초 후 자동 해제", color:"#6c5ce7", file:"content.js", line:"400-407" },
@@ -117,7 +118,7 @@ const ARCH = [
   { id:"dashboard",  label:"Dashboard",         icon:"📊",  desc:"dashboard.html / dashboard.js\n실시간 오디오 시각화\nFFT 스펙트럼 / 파형 (RMS 기반 근사)\n60fps Canvas 렌더링", color:"#74b9ff", files:["dashboard.html","dashboard.js"] },
   { id:"background", label:"Service Worker",    icon:"⚙️",  desc:"background.js\n배지 업데이트 (ON/OFF 표시)\nchrome.runtime 메시지 라우팅\nManifest V3 서비스 워커", color:"#fdcb6e", files:["background.js"] },
   { id:"bridge",     label:"Bridge (ISOLATED)",  icon:"🌉",  desc:"bridge.js\nMAIN ↔ ISOLATED world 중개\nwindow.postMessage 양방향\n5초 타임아웃 에러 응답\nExtension URL 전달", color:"#a29bfe", files:["bridge.js"] },
-  { id:"content",    label:"Content (MAIN)",     icon:"🎵",  desc:"content.js\ngetUserMedia 인터셉트\n오디오 파이프라인 구축 (12개 노드)\n하울링 감지 & 노치 필터 억제\nRTCPeerConnection 래핑", color:"#fd79a8", files:["content.js"] },
+  { id:"content",    label:"Content (MAIN)",     icon:"🎵",  desc:"content.js\ngetUserMedia 인터셉트\n오디오 파이프라인 구축 (12개 노드)\n하울링 감지 & 노치 필터 억제\nVAD 음성 감지 & 자동 마이크 제어\nRTCPeerConnection 래핑", color:"#fd79a8", files:["content.js"] },
   { id:"worklet",    label:"AudioWorklet",       icon:"🧠",  desc:"rnnoise-worklet.js (1.9MB)\nWASM binary base64 내장\nEmscripten glue code\natob polyfill (AudioWorkletGlobalScope)\n별도 오디오 렌더링 스레드", color:"#81ecec", files:["rnnoise-worklet.js"] },
 ];
 
@@ -140,8 +141,19 @@ const HOWLING = {
   flow: ["FFT 분석\n(preGainAnalyser)","피크 탐색\n(200-4000Hz)","연속 감지\n판정 (≥2회)","노치 활성화\n+ 게인 0.1","3초 미감지\n→ 복원"],
 };
 
+const VAD = {
+  params: [
+    ["감지 주기","50ms (20Hz)"], ["감지 임계","-35dB (기본값)"],
+    ["히스테리시스","3dB"], ["복구 지연","2000ms (기본값)"],
+    ["분석 소스","preGainAnalyser"], ["감지 방식","RMS → dB 변환"],
+    ["마이크 제어","enabled 토글"], ["전환 방식","setTargetAtTime (50ms)"],
+    ["안전 기본값","항상 마이크 ON"], ["독립 동작","하울링 감지와 병행"],
+  ],
+  flow: ["RMS 분석\n(preGainAnalyser)","dB 변환\n(20·log₁₀)","임계값 비교\n(히스테리시스)","음성→마이크 ON\n침묵→타이머 시작","복구 지연 경과\n→ 마이크 OFF"],
+};
+
 // ── State ──
-let state = { view:"pipeline", selected:null, rnnoise:true, signal:true, howling:false };
+let state = { view:"pipeline", selected:null, rnnoise:true, signal:true, howling:false, vadActive:true };
 let animFrame = null;
 let signalPhases = [];
 
@@ -150,7 +162,8 @@ function render() {
   const c = document.getElementById("canvas");
   if (state.view === "pipeline") renderPipeline(c);
   else if (state.view === "arch") renderArch(c);
-  else renderHowling(c);
+  else if (state.view === "howling") renderHowling(c);
+  else if (state.view === "vad") renderVAD(c);
   renderSide();
   renderTabs();
 }
@@ -177,8 +190,9 @@ function renderPipeline(container) {
     <label><input type="checkbox" id="chkRnn" ${state.rnnoise?"checked":""}> RNNoise AI</label>
     <label><input type="checkbox" id="chkSig" ${state.signal?"checked":""}> 신호 애니메이션</label>
     <label style="color:${state.howling?"var(--red)":"var(--text)"}"><input type="checkbox" id="chkHowl" ${state.howling?"checked":""}> 하울링 시뮬레이션</label>
+    <label style="color:${state.vadActive?"#3498db":"var(--text)"}"><input type="checkbox" id="chkVad" ${state.vadActive?"checked":""}> VAD 자동 마이크</label>
     <div class="spacer"></div>
-    <span class="status">${chain.length}개 노드 • ${state.rnnoise?"RNNoise ON":"RNNoise OFF"}${state.howling?" • 하울링 감지됨":""}</span>
+    <span class="status">${chain.length}개 노드 • ${state.rnnoise?"RNNoise ON":"RNNoise OFF"}${state.howling?" • 하울링 감지됨":""}${state.vadActive?" • VAD ON":""}</span>
   </div>`;
 
   svg += `<svg width="100%" viewBox="0 0 ${W} ${H}" id="pipelineSvg">`;
@@ -243,6 +257,7 @@ function renderPipeline(container) {
   document.getElementById("chkRnn").onchange = e => { state.rnnoise = e.target.checked; render(); };
   document.getElementById("chkSig").onchange = e => { state.signal = e.target.checked; render(); };
   document.getElementById("chkHowl").onchange = e => { state.howling = e.target.checked; render(); };
+  document.getElementById("chkVad").onchange = e => { state.vadActive = e.target.checked; render(); };
   container.querySelectorAll(".node-group").forEach(g => {
     g.onclick = () => { const id = g.dataset.id; state.selected = state.selected === id ? null : id; renderSide(); highlightNode(); };
   });
@@ -418,6 +433,80 @@ function renderHowling(container) {
   stopSignalAnim();
 }
 
+// ── VAD View ──
+function renderVAD(container) {
+  const isV = state.vadActive;
+  let html = `<div class="howling-panel">`;
+  html += `<div class="howling-title"><span>🎤 음성 활동 감지 (VAD) & 자동 마이크 제어</span>`;
+  html += `<button class="howling-btn" id="vadBtn" style="background:${isV?'#3498db':'var(--muted)'}">${isV?'VAD 활성':'VAD 비활성'}</button></div>`;
+
+  // Process flow
+  html += `<div style="margin-bottom:6px;color:var(--dim);font-size:11;font-weight:600">처리 흐름</div>`;
+  html += `<div class="howling-flow">`;
+  VAD.flow.forEach((step, i) => {
+    const bg = isV ? 'rgba(52,152,219,0.2)' : 'rgba(108,92,231,0.15)';
+    const bd = isV ? 'rgba(52,152,219,0.4)' : 'rgba(108,92,231,0.3)';
+    html += `<div class="howling-step" style="background:${bg};border:1px solid ${bd}">${step}</div>`;
+    if (i < VAD.flow.length - 1) html += `<span class="howling-arrow">\u2192</span>`;
+  });
+  html += `</div>`;
+
+  // Pipeline diagram
+  html += `<div style="margin:16px 0 6px;color:var(--dim);font-size:11;font-weight:600">파이프라인 내 위치</div>`;
+  html += `<div style="background:#0d0f14;border-radius:8px;padding:12px;font-family:monospace;font-size:11;line-height:1.8;color:var(--text)">`;
+  html += `<span style="color:var(--cyan)">compressor</span>`;
+  html += ` \u2500\u252C\u2500 <span style="color:#3498db">preGainAnalyser</span> <span style="color:var(--dim)">(RMS/dB \uBD84\uC11D)</span><br>`;
+  html += `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2502&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2193 <span style="color:var(--dim)">50ms \uAC04\uACA9 \uC74C\uC131 \uAC10\uC9C0</span><br>`;
+  html += `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2502&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#3498db">\u2500\u2500\u2500\u2500 VAD \uAC10\uC9C0\uAE30 \u2500\u2500\u2500\u2500</span>\u21B4<br>`;
+  html += `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2502&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2193<br>`;
+  html += `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2502&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:${isV?'#3498db':'var(--dim)'}">toggleAutoMic()</span><br>`;
+  html += `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2502&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2193<br>`;
+  html += `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2514\u2500 notch[0..2] \u2192 <span style="color:var(--green)">gain</span>`;
+  html += ` \u2192 <span style="color:${isV?'#3498db':'var(--green)'}">wetGain ${isV?'(VAD \uC81C\uC5B4)':'(1.0)'}</span>`;
+  html += ` / <span style="color:var(--dim)">dryGain</span>`;
+  html += `</div>`;
+
+  // Timeline example
+  html += `<div style="margin:16px 0 6px;color:var(--dim);font-size:11;font-weight:600">동작 타임라인 예시 (복구 지연: 2000ms)</div>`;
+  html += `<div style="background:#0d0f14;border-radius:8px;padding:12px;font-family:monospace;font-size:11;line-height:1.7;color:var(--text)">`;
+  html += `<span style="color:var(--dim)">Time&nbsp;&nbsp;&nbsp;Level&nbsp;&nbsp;Status&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Mic</span><br>`;
+  html += `<span style="color:var(--dim)">\u2500\u2500\u2500\u2500&nbsp;&nbsp;\u2500\u2500\u2500\u2500\u2500&nbsp;&nbsp;\u2500\u2500\u2500\u2500\u2500\u2500&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\u2500\u2500\u2500</span><br>`;
+  html += `0ms&nbsp;&nbsp;&nbsp;<span style="color:var(--dim)">-60dB</span>&nbsp;&nbsp;<span style="color:var(--dim)">Silence</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--red)">OFF</span><br>`;
+  html += `200ms&nbsp;<span style="color:var(--green)">-30dB</span>&nbsp;&nbsp;<span style="color:var(--green)">Speaking!</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--green)">ON</span> <span style="color:var(--dim)">(immediate)</span><br>`;
+  html += `800ms&nbsp;<span style="color:var(--green)">-32dB</span>&nbsp;&nbsp;<span style="color:var(--green)">Still Speaking</span>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--green)">ON</span><br>`;
+  html += `1.8s&nbsp;&nbsp;<span style="color:var(--orange)">-45dB</span>&nbsp;&nbsp;<span style="color:var(--orange)">Silence starts</span>&nbsp;&nbsp;&nbsp;<span style="color:var(--green)">ON</span> <span style="color:var(--dim)">(timer)</span><br>`;
+  html += `2.1s&nbsp;&nbsp;<span style="color:var(--dim)">-50dB</span>&nbsp;&nbsp;<span style="color:var(--dim)">2s elapsed</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--red)">OFF</span>`;
+  html += `</div>`;
+
+  // Params
+  html += `<div style="margin:16px 0 6px;color:var(--dim);font-size:11;font-weight:600">파라미터 상세</div>`;
+  html += `<div class="howling-params">`;
+  VAD.params.forEach(([k,v]) => {
+    html += `<div class="howling-param"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  });
+  html += `</div>`;
+
+  // State machine
+  html += `<div style="margin:16px 0 6px;color:var(--dim);font-size:11;font-weight:600">상태 머신</div>`;
+  html += `<div style="background:#0d0f14;border-radius:8px;padding:12px;font-family:monospace;font-size:11;line-height:1.7;color:var(--text)">`;
+  html += `<span style="color:var(--green)">VAD 비활성</span> <span style="color:var(--dim)">\u2192 마이크 항상 ON (안전 기본값)</span><br><br>`;
+  html += `<span style="color:var(--green)">VAD 활성:</span><br>`;
+  html += `&nbsp; <span style="color:var(--dim)">침묵</span> \u2500\u2500<span style="color:#3498db">[dB \u2265 threshold]</span>\u2500\u2500\u2192 <span style="color:var(--green)">음성 감지 (Mic ON)</span><br>`;
+  html += `&nbsp; <span style="color:var(--green)">음성</span> \u2500\u2500<span style="color:var(--dim)">[dB < threshold - hysteresis]</span>\u2500\u2500\u2192 <span style="color:var(--orange)">복구 대기</span><br>`;
+  html += `&nbsp; <span style="color:var(--orange)">복구 대기</span> \u2500\u2500<span style="color:var(--dim)">[${isV?'2':'N'}초 경과]</span>\u2500\u2500\u2192 <span style="color:var(--red)">침묵 (Mic OFF)</span><br>`;
+  html += `&nbsp; <span style="color:var(--orange)">복구 대기</span> \u2500\u2500<span style="color:#3498db">[다시 음성 감지]</span>\u2500\u2500\u2192 <span style="color:var(--green)">음성 감지 (Mic ON)</span><br>`;
+  html += `<br><span style="color:var(--dim)">히스테리시스:</span><br>`;
+  html += `&nbsp; \u2022 음성\u2192침묵: threshold - hysteresis (더 낮은 dB에서 전환)<br>`;
+  html += `&nbsp; \u2022 침묵\u2192음성: threshold (기본 임계값 사용)<br>`;
+  html += `&nbsp; \u2022 빠른 온/오프 진동 방지`;
+  html += `</div>`;
+
+  html += `</div>`;
+  container.innerHTML = html;
+  document.getElementById("vadBtn").onclick = () => { state.vadActive = !state.vadActive; render(); };
+  stopSignalAnim();
+}
+
 // ── Side Panel ──
 function renderSide() {
   const panel = document.getElementById("sidePanel");
@@ -458,6 +547,19 @@ function renderSide() {
     html += `<div style="margin-top:12px;padding:8px;border-radius:8px;border:1px solid ${state.howling?'var(--red)':'var(--green)'}40;font-size:11">`;
     html += `<span style="color:${state.howling?'var(--red)':'var(--green)'}">현재 게인: ${state.howling?"0.1x (억제됨)":"1.5x (정상)"}</span>`;
     html += `</div>`;
+  }
+  if (id === "preAnalyser") {
+    html += `<div style="margin-top:12px;padding:8px;border-radius:8px;border:1px solid ${state.vadActive?'#3498db':'var(--border)'}40;font-size:11">`;
+    html += `<span style="color:${state.vadActive?'#3498db':'var(--dim)'}">VAD 상태: ${state.vadActive?"🔵 활성 (음성 감지 중)":"⚪ 비활성"}</span>`;
+    html += `</div>`;
+    if (state.vadActive) {
+      html += `<div style="margin-top:8px;background:#0d0f14;border-radius:8px;padding:10px;font-size:11;color:var(--text)">`;
+      html += `<div style="color:var(--dim);margin-bottom:4px;font-weight:600">VAD 파라미터</div>`;
+      [["임계값","-35dB"],["히스테리시스","3dB"],["복구 지연","2000ms"],["감지 주기","50ms"]].forEach(([k,v]) => {
+        html += `<div style="display:flex;justify-content:space-between"><span style="color:var(--dim)">${k}</span><span style="font-family:monospace">${v}</span></div>`;
+      });
+      html += `</div>`;
+    }
   }
 
   panel.innerHTML = html;

@@ -18,56 +18,45 @@
     lowPassFrequency: { el: null, display: null, format: v => v >= 1000 ? `${(v/1000).toFixed(0)}kHz` : `${v}Hz` },
     compressorThreshold: { el: null, display: null, format: v => `${v}dB` },
     compressorRatio: { el: null, display: null, format: v => `${v}:1` },
+    vadThreshold: { el: null, display: null, format: v => `${v}dB` },
+    vadRecoveryDelay: { el: null, display: null, format: v => `${(v/1000).toFixed(1)}s` },
+    vadHysteresis: { el: null, display: null, format: v => `${v}dB` },
   };
 
   const TOGGLE_CONTROLS = [
     'echoCancellation', 'noiseSuppression', 'autoGainControl',
-    'howlingDetection', 'rnnoiseEnabled'
+    'howlingDetection', 'vadEnabled', 'rnnoiseEnabled'
   ];
 
-  // ── 프리셋 정의 ──
+  // ── 프리셋 정의 (dashboard.js와 동일) ──
   const PRESETS = {
     quiet: {
-      name: '조용한 환경',
-      gain: 1.0,
-      highPassFrequency: 50,
-      lowPassFrequency: 16000,
-      compressorThreshold: -20,
-      compressorRatio: 2,
-      rnnoiseEnabled: false,
-      howlingDetection: false,
+      gain: 1.0, highPassFrequency: 50, lowPassFrequency: 16000,
+      compressorThreshold: -20, compressorRatio: 2, compressorKnee: 10,
+      compressorAttack: 0.003, compressorRelease: 0.25,
+      rnnoiseEnabled: false, howlingDetection: false,
+      noiseSuppression: true, echoCancellation: true, autoGainControl: true,
     },
     noisy: {
-      name: '소음 환경',
-      gain: 1.8,
-      highPassFrequency: 120,
-      lowPassFrequency: 12000,
-      compressorThreshold: -30,
-      compressorRatio: 6,
-      rnnoiseEnabled: true,
-      noiseSuppression: true,
-      howlingDetection: true,
+      gain: 1.8, highPassFrequency: 120, lowPassFrequency: 12000,
+      compressorThreshold: -30, compressorRatio: 6, compressorKnee: 15,
+      compressorAttack: 0.003, compressorRelease: 0.25,
+      rnnoiseEnabled: true, noiseSuppression: true, howlingDetection: true,
+      echoCancellation: true, autoGainControl: true,
     },
     meeting: {
-      name: '회의실',
-      gain: 1.5,
-      highPassFrequency: 80,
-      lowPassFrequency: 14000,
-      compressorThreshold: -24,
-      compressorRatio: 4,
-      echoCancellation: true,
-      rnnoiseEnabled: true,
-      howlingDetection: true,
+      gain: 1.5, highPassFrequency: 80, lowPassFrequency: 14000,
+      compressorThreshold: -24, compressorRatio: 4, compressorKnee: 10,
+      compressorAttack: 0.003, compressorRelease: 0.25,
+      echoCancellation: true, rnnoiseEnabled: true, howlingDetection: true,
+      noiseSuppression: true, autoGainControl: true,
     },
     boost: {
-      name: '볼륨 최대',
-      gain: 3.5,
-      highPassFrequency: 60,
-      lowPassFrequency: 16000,
-      compressorThreshold: -18,
-      compressorRatio: 8,
-      rnnoiseEnabled: true,
-      autoGainControl: false,
+      gain: 3.5, highPassFrequency: 60, lowPassFrequency: 16000,
+      compressorThreshold: -18, compressorRatio: 8, compressorKnee: 5,
+      compressorAttack: 0.001, compressorRelease: 0.15,
+      rnnoiseEnabled: true, autoGainControl: false,
+      noiseSuppression: true, echoCancellation: true, howlingDetection: true,
     },
   };
 
@@ -113,6 +102,9 @@
         lowPassFrequency: 'lowPassValue',
         compressorThreshold: 'compThreshValue',
         compressorRatio: 'compRatioValue',
+        vadThreshold: 'vadThresholdValue',
+        vadRecoveryDelay: 'vadRecoveryValue',
+        vadHysteresis: 'vadHysteresisValue',
       }[key];
       ctrl.display = document.getElementById(displayId);
     }
@@ -287,6 +279,30 @@
           updateSetting(key, e.target.checked);
         });
       }
+    }
+
+    // VAD toggle - 슬라이더 활성화/비활성화
+    const vadEnabledEl = document.getElementById('vadEnabled');
+    if (vadEnabledEl) {
+      vadEnabledEl.addEventListener('change', (e) => {
+        const isEnabled = e.target.checked;
+        const vadControls = document.querySelectorAll(
+          '#vadThresholdControl, #vadRecoveryControl, #vadHysteresisControl'
+        );
+        vadControls.forEach(ctrl => {
+          ctrl.style.opacity = isEnabled ? '1' : '0.5';
+          ctrl.style.pointerEvents = isEnabled ? 'auto' : 'none';
+        });
+      });
+      // 초기화
+      const isEnabled = vadEnabledEl.checked;
+      const vadControls = document.querySelectorAll(
+        '#vadThresholdControl, #vadRecoveryControl, #vadHysteresisControl'
+      );
+      vadControls.forEach(ctrl => {
+        ctrl.style.opacity = isEnabled ? '1' : '0.5';
+        ctrl.style.pointerEvents = isEnabled ? 'auto' : 'none';
+      });
     }
 
     // 프리셋 버튼

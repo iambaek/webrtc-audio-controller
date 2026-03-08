@@ -600,6 +600,55 @@
       </div>
     </div>
 
+    <!-- ====== 음성 활동 감지 (VAD) ====== -->
+    <div class="card" style="background: rgba(52, 152, 219, 0.05); border-left: 3px solid #3498db;">
+      <div class="card-header">
+        <h2>음성 활동 감지 (VAD)</h2>
+      </div>
+      <div class="card-body">
+        <div class="toggle-row">
+          <div>
+            <label>자동 마이크 제어 활성화</label>
+            <div class="desc">음성 미감지 시 자동으로 마이크 끄기, 음성 감지 시 켜기</div>
+          </div>
+          <label class="toggle-sm">
+            <input type="checkbox" id="vadEnabled" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div id="vadThresholdControl" class="control-row">
+          <div>
+            <label>감지 임계값</label>
+            <div class="desc">낮을수록 작은 음성도 감지</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="range" id="vadThreshold" min="-60" max="-20" step="1" value="-35" style="flex: 1;">
+            <span class="value" id="vadThresholdValue">-35dB</span>
+          </div>
+        </div>
+        <div id="vadRecoveryControl" class="control-row">
+          <div>
+            <label>복구 지연</label>
+            <div class="desc">침묵 후 마이크 끌 때까지의 시간</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="range" id="vadRecoveryDelay" min="500" max="5000" step="100" value="2000" style="flex: 1;">
+            <span class="value" id="vadRecoveryValue">2.0s</span>
+          </div>
+        </div>
+        <div id="vadHysteresisControl" class="control-row">
+          <div>
+            <label>히스테리시스</label>
+            <div class="desc">온/오프 경계의 흔들림 방지</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="range" id="vadHysteresis" min="0" max="10" step="0.5" value="3" style="flex: 1;">
+            <span class="value" id="vadHysteresisValue">3dB</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ====== 이벤트 로그 ====== -->
     <div class="card">
       <div class="card-header">

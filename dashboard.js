@@ -55,11 +55,14 @@
     compressorKnee:      { display: 'compKneeValue',    format: v => `${v} dB` },
     compressorAttack:    { display: 'compAttackValue',  format: v => `${Math.round(v * 1000)} ms` },
     compressorRelease:   { display: 'compReleaseValue', format: v => `${Math.round(v * 1000)} ms` },
+    vadThreshold:        { display: 'vadThresholdValue', format: v => `${v}dB` },
+    vadRecoveryDelay:    { display: 'vadRecoveryValue', format: v => `${(v/1000).toFixed(1)}s` },
+    vadHysteresis:       { display: 'vadHysteresisValue', format: v => `${v}dB` },
   };
 
   const TOGGLES = [
     'rnnoiseEnabled', 'noiseSuppression', 'echoCancellation',
-    'howlingDetection', 'autoGainControl'
+    'howlingDetection', 'autoGainControl', 'vadEnabled'
   ];
 
   let currentSettings = {};
@@ -88,9 +91,9 @@
   }
 
   // ── 초기화 ──
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     initCanvases();
-    findDoorayTab();
+    await findDoorayTab();
     bindEvents();
     startPolling();
     listenForExternalChanges();
@@ -156,8 +159,21 @@
     try {
       return await chrome.tabs.sendMessage(doorayTabId, message);
     } catch (e) {
+      // 연결 실패 시 탭 재검색 시도
+      const prevTabId = doorayTabId;
       doorayTabId = null;
-      updateConnectionStatus(false);
+      await findDoorayTab();
+      if (doorayTabId && doorayTabId !== prevTabId) {
+        // 새 탭 발견 시 재시도
+        try {
+          return await chrome.tabs.sendMessage(doorayTabId, message);
+        } catch (e2) {
+          doorayTabId = null;
+          updateConnectionStatus(false);
+          return null;
+        }
+      }
+      if (!doorayTabId) updateConnectionStatus(false);
       return null;
     }
   }
@@ -328,6 +344,31 @@
           badge.textContent = e.target.checked ? 'RNNoise ON' : 'RNNoise OFF';
           badge.style.background = e.target.checked ? '#00b894' : '#636e72';
         }
+
+        // VAD 토글 - 슬라이더 활성화/비활성화
+        if (key === 'vadEnabled') {
+          const vadControls = document.querySelectorAll(
+            '#vadThresholdControl, #vadRecoveryControl, #vadHysteresisControl'
+          );
+          vadControls.forEach(ctrl => {
+            ctrl.style.opacity = e.target.checked ? '1' : '0.5';
+            ctrl.style.pointerEvents = e.target.checked ? 'auto' : 'none';
+          });
+          addLog('success', `VAD 자동 마이크 제어: ${e.target.checked ? '활성화' : '비활성화'}`);
+        }
+      });
+    }
+
+    // VAD 토글 초기화
+    const vadEnabledEl = document.getElementById('vadEnabled');
+    if (vadEnabledEl) {
+      const isEnabled = vadEnabledEl.checked;
+      const vadControls = document.querySelectorAll(
+        '#vadThresholdControl, #vadRecoveryControl, #vadHysteresisControl'
+      );
+      vadControls.forEach(ctrl => {
+        ctrl.style.opacity = isEnabled ? '1' : '0.5';
+        ctrl.style.pointerEvents = isEnabled ? 'auto' : 'none';
       });
     }
 
@@ -404,10 +445,14 @@
   }
 
   // ── 실시간 폴링 & 시각화 ──
+  let isPolling = false;
   function startPolling() {
     pollInterval = setInterval(async () => {
-      const response = await sendToContent({ type: 'GET_AUDIO_LEVELS' });
-      if (!response?.levels?.length) return;
+      if (isPolling) return; // 이전 요청 완료 전 중복 방지
+      isPolling = true;
+      try {
+        const response = await sendToContent({ type: 'GET_AUDIO_LEVELS' });
+        if (!response?.levels?.length) return;
 
       const level = response.levels[0];
 
@@ -432,6 +477,9 @@
       }
 
       updateVisualization(level);
+      } finally {
+        isPolling = false;
+      }
     }, 80);
   }
 

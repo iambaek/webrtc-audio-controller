@@ -311,6 +311,28 @@
       border-radius: 4px;
       font-weight: 600;
     }
+
+    /* VAD 섹션 강조 */
+    .vad-section {
+      background: rgba(52, 152, 219, 0.05);
+      border-left: 3px solid #3498db;
+      padding-left: 13px;
+    }
+
+    #vadThresholdControl,
+    #vadRecoveryControl,
+    #vadHysteresisControl {
+      opacity: 1;
+      transition: opacity 0.3s;
+    }
+
+    /* VAD 비활성화 시 제어 옅게 표시 */
+    .vad-disabled #vadThresholdControl,
+    .vad-disabled #vadRecoveryControl,
+    .vad-disabled #vadHysteresisControl {
+      opacity: 0.5;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -408,6 +430,33 @@
         <input type="checkbox" id="autoGainControl" checked>
         <span class="slider"></span>
       </label>
+    </div>
+  </div>
+
+  <!-- 음성 활동 감지 (VAD) -->
+  <div class="section vad-section">
+    <div class="section-title">음성 활동 감지 (VAD)</div>
+    <div class="toggle-row">
+      <label>자동 마이크 제어 활성화</label>
+      <label class="toggle-sm">
+        <input type="checkbox" id="vadEnabled" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="control-row" id="vadThresholdControl">
+      <label>감지 임계값</label>
+      <input type="range" id="vadThreshold" min="-60" max="-20" step="1" value="-35">
+      <span class="value" id="vadThresholdValue">-35dB</span>
+    </div>
+    <div class="control-row" id="vadRecoveryControl">
+      <label>복구 지연</label>
+      <input type="range" id="vadRecoveryDelay" min="500" max="5000" step="100" value="2000">
+      <span class="value" id="vadRecoveryValue">2.0s</span>
+    </div>
+    <div class="control-row" id="vadHysteresisControl">
+      <label>히스테리시스</label>
+      <input type="range" id="vadHysteresis" min="0" max="10" step="0.5" value="3">
+      <span class="value" id="vadHysteresisValue">3dB</span>
     </div>
   </div>
 
