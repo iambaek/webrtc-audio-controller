@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dooray WebRTC Audio Controller",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Dooray 화상회의 오디오 튜닝 - 하울링 방지, 볼륨 부스트, RNNoise AI 노이즈 제거",
   "permissions": [
     "activeTab",
@@ -40,7 +40,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["rnnoise-worklet.js", "rnnoise.wasm"],
+      "resources": ["rnnoise-worklet.js"],
       "matches": ["https://*.dooray.com/*"]
     }
   ],

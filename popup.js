@@ -73,7 +73,27 @@
 
   let currentSettings = {};
   let levelPollInterval = null;
-  let ignoreNextStorageChange = false; // 자신이 발생시킨 변경 무시용
+  let lastStorageChangeId = 0; // 자신이 발생시킨 변경 추적용 (경쟁 조건 방지)
+
+  // [추가] 슬라이더 throttle 유틸리티
+  function throttle(fn, delay) {
+    let lastCall = 0;
+    let timer = null;
+    return function (...args) {
+      const now = Date.now();
+      if (now - lastCall >= delay) {
+        lastCall = now;
+        fn.apply(this, args);
+      } else {
+        // 마지막 값은 반드시 전송 (trailing call)
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          lastCall = Date.now();
+          fn.apply(this, args);
+        }, delay - (now - lastCall));
+      }
+    };
+  }
 
   // ── 초기화 ──
   document.addEventListener('DOMContentLoaded', () => {
@@ -177,9 +197,11 @@
 
   // ── 브로드캐스트: background를 통해 대시보드에 전파 ──
   function broadcastSettingsChange(settings) {
-    ignoreNextStorageChange = true;
+    // 증분 ID로 자신의 변경 추적 (경쟁 조건 방지)
+    lastStorageChangeId = Date.now();
+    const changeId = lastStorageChangeId;
     // chrome.storage.local에 저장 (SSOT)
-    chrome.storage.local.set({ audioSettings: settings });
+    chrome.storage.local.set({ audioSettings: settings, _changeId: changeId });
     // background에 브로드캐스트 요청
     chrome.runtime.sendMessage({
       type: 'SETTINGS_CHANGED',
@@ -190,11 +212,11 @@
 
   // ── 외부 변경 수신 (대시보드에서 변경한 경우) ──
   function listenForExternalChanges() {
-    // 방법 1: chrome.storage.onChanged
+    // 방법 1: chrome.storage.onChanged (증분 ID로 자기 변경 무시)
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.audioSettings) {
-        if (ignoreNextStorageChange) {
-          ignoreNextStorageChange = false;
+        // 자신이 발생시킨 변경인지 changeId로 확인
+        if (changes._changeId && changes._changeId.newValue === lastStorageChangeId) {
           return;
         }
         const newSettings = changes.audioSettings.newValue;
@@ -221,13 +243,14 @@
       updateSetting('enabled', e.target.checked);
     });
 
-    // 슬라이더
+    // 슬라이더 (throttle 적용: 50ms 간격으로 content script 전송)
     for (const [key, ctrl] of Object.entries(SLIDER_CONTROLS)) {
       if (ctrl.el) {
+        const throttledUpdate = throttle((val) => updateSetting(key, val), 50);
         ctrl.el.addEventListener('input', (e) => {
           const val = parseFloat(e.target.value);
           ctrl.display.textContent = ctrl.format(val);
-          updateSetting(key, val);
+          throttledUpdate(val);
         });
       }
     }

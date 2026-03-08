@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "@shiguredo/rnnoise-wasm": "^2025.1.5",
-    "@timephy/rnnoise-wasm": "^1.0.0"
-  }
-}

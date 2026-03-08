@@ -66,7 +66,26 @@
   let doorayTabId = null;
   let pollInterval = null;
   let fftCtx, waveCtx;
-  let ignoreNextStorageChange = false;
+  let lastStorageChangeId = 0; // 자신이 발생시킨 변경 추적용 (경쟁 조건 방지)
+
+  // [추가] 슬라이더 throttle 유틸리티
+  function throttle(fn, delay) {
+    let lastCall = 0;
+    let timer = null;
+    return function (...args) {
+      const now = Date.now();
+      if (now - lastCall >= delay) {
+        lastCall = now;
+        fn.apply(this, args);
+      } else {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          lastCall = Date.now();
+          fn.apply(this, args);
+        }, delay - (now - lastCall));
+      }
+    };
+  }
 
   // ── 초기화 ──
   document.addEventListener('DOMContentLoaded', () => {
@@ -212,8 +231,10 @@
 
   // ── 브로드캐스트: background를 통해 팝업에 전파 ──
   function broadcastSettingsChange(settings) {
-    ignoreNextStorageChange = true;
-    chrome.storage.local.set({ audioSettings: settings });
+    // 증분 ID로 자신의 변경 추적 (경쟁 조건 방지)
+    lastStorageChangeId = Date.now();
+    const changeId = lastStorageChangeId;
+    chrome.storage.local.set({ audioSettings: settings, _changeId: changeId });
     chrome.runtime.sendMessage({
       type: 'SETTINGS_CHANGED',
       settings: settings,
@@ -223,11 +244,11 @@
 
   // ── 외부 변경 수신 (팝업에서 변경한 경우) ──
   function listenForExternalChanges() {
-    // 방법 1: chrome.storage.onChanged
+    // 방법 1: chrome.storage.onChanged (증분 ID로 자기 변경 무시)
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.audioSettings) {
-        if (ignoreNextStorageChange) {
-          ignoreNextStorageChange = false;
+        // 자신이 발생시킨 변경인지 changeId로 확인
+        if (changes._changeId && changes._changeId.newValue === lastStorageChangeId) {
           return;
         }
         const newSettings = changes.audioSettings.newValue;
@@ -259,14 +280,15 @@
       addLog(enabled ? 'success' : 'warn', `오디오 처리 ${enabled ? '활성화' : '비활성화'}`);
     });
 
-    // 슬라이더
+    // 슬라이더 (throttle 적용: 50ms 간격으로 content script 전송)
     for (const [key, cfg] of Object.entries(SLIDERS)) {
       const el = document.getElementById(key);
       if (!el) continue;
+      const throttledUpdate = throttle((val) => updateSetting(key, val), 50);
       el.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
         document.getElementById(cfg.display).textContent = cfg.format(val);
-        updateSetting(key, val);
+        throttledUpdate(val);
       });
     }
 
@@ -391,6 +413,9 @@
   }
 
   // ── 시각화 (FFT 스펙트럼 & 파형) ──
+  // ※ 참고: 현재는 실제 FFT 데이터가 아닌 RMS 값 기반의 근사 시각화입니다.
+  //   실제 주파수 데이터는 content script(MAIN world)에서만 접근 가능하며,
+  //   대시보드는 별도 탭이므로 RMS/peak 값으로 추정 표시합니다.
   let fftHistory = new Float32Array(128).fill(-100);
   let waveHistory = new Float32Array(256).fill(0);
   let frameCount = 0;

@@ -9,13 +9,12 @@
 (function () {
   'use strict';
 
-  // WASM/Worklet URL을 MAIN world에 전달
+  // Worklet URL을 MAIN world에 전달 (WASM은 JS에 내장되어 별도 파일 불필요)
   window.postMessage({
     source: 'dooray-audio-bridge',
     type: 'EXTENSION_URLS',
     urls: {
       rnnoiseWorklet: chrome.runtime.getURL('rnnoise-worklet.js'),
-      rnnoiseWasm: chrome.runtime.getURL('rnnoise.wasm'),
     }
   }, '*');
 
@@ -41,9 +40,14 @@
       payload: message
     }, '*');
 
-    // 5초 타임아웃
+    // 5초 타임아웃: 응답이 없으면 에러 응답 반환 (팝업이 무기한 대기하지 않도록)
     setTimeout(() => {
       window.removeEventListener('message', onResponse);
+      try {
+        sendResponse({ error: 'TIMEOUT', message: 'Content script 응답 타임아웃 (5초)' });
+      } catch (e) {
+        // sendResponse가 이미 호출된 경우 무시
+      }
     }, 5000);
 
     return true; // 비동기 응답 유지
